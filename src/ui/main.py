@@ -14,6 +14,7 @@ from ..usb.protocol import (FeatureReport, PedalReport, Pedal, PEDAL_TO_REPORT,
 from ..core.profile import ProfileManager
 from ..usb.device import VenymDevice, ConnectionState
 from .curve_editor import CurveEditor
+from .i18n import t, set_lang, get_lang
 
 # ── Theme ──────────────────────────────────────────────
 BG          = "#000000"
@@ -80,7 +81,7 @@ class PedalPanel(ctk.CTkFrame):
         BW, BH = 28, 26
 
         # DZ basse
-        ctk.CTkLabel(settings, text="DZ basse", font=LABEL_FONT,
+        ctk.CTkLabel(settings, text=t("dz_low"), font=LABEL_FONT,
                       text_color=LABEL_CLR, anchor="w").grid(row=0, column=0, sticky="w", pady=2)
         ctk.CTkButton(settings, text="-", width=BW, height=BH, font=BTN_FONT,
                        command=lambda: self._dz_low_step(-0.5)).grid(row=0, column=1, padx=(10, 5), pady=2)
@@ -90,7 +91,7 @@ class PedalPanel(ctk.CTkFrame):
                        command=lambda: self._dz_low_step(0.5)).grid(row=0, column=3, padx=(5, 0), pady=2)
 
         # DZ haute
-        ctk.CTkLabel(settings, text="DZ haute", font=LABEL_FONT,
+        ctk.CTkLabel(settings, text=t("dz_high"), font=LABEL_FONT,
                       text_color=LABEL_CLR, anchor="w").grid(row=1, column=0, sticky="w", pady=2)
         ctk.CTkButton(settings, text="-", width=BW, height=BH, font=BTN_FONT,
                        command=lambda: self._dz_high_step(-0.5)).grid(row=1, column=1, padx=(10, 5), pady=2)
@@ -101,7 +102,7 @@ class PedalPanel(ctk.CTkFrame):
 
         # Force (brake) / placeholder
         if is_brake:
-            ctk.CTkLabel(settings, text="Force", font=LABEL_FONT,
+            ctk.CTkLabel(settings, text=t("force"), font=LABEL_FONT,
                           text_color=LABEL_CLR, anchor="w").grid(row=2, column=0, sticky="w", pady=2)
             ctk.CTkButton(settings, text="-", width=BW, height=BH, font=BTN_FONT,
                            command=lambda: self._force_step(-1)).grid(row=2, column=1, padx=(10, 5), pady=2)
@@ -189,7 +190,7 @@ class VenymPitstop(ctk.CTk):
 
     def __init__(self):
         super().__init__()
-        self.title("Venym Pitstop")
+        self.title(t("app_title"))
         self.geometry("1250x680")
         self.minsize(1000, 550)
         self.configure(fg_color=BG)
@@ -205,6 +206,7 @@ class VenymPitstop(ctk.CTk):
         self._device_name = ""
 
         self._build_ui()
+        self._set_connected_ui(False)
         self._poll_device()
 
     def _build_ui(self):
@@ -227,7 +229,7 @@ class VenymPitstop(ctk.CTk):
         info = ctk.CTkFrame(header, fg_color="transparent")
         info.grid(row=0, column=0, sticky="w", padx=PAD, pady=PAD)
 
-        self.status_label = ctk.CTkLabel(info, text="Aucun pedalier connecte",
+        self.status_label = ctk.CTkLabel(info, text=t("no_device"),
                                           font=("", 13, "bold"), text_color=TEXT_CLR)
         self.status_label.pack(anchor="w")
 
@@ -239,19 +241,26 @@ class VenymPitstop(ctk.CTk):
         btns = ctk.CTkFrame(header, fg_color="transparent")
         btns.grid(row=0, column=2, sticky="e", padx=PAD, pady=PAD)
 
-        self.connect_btn = ctk.CTkButton(btns, text="Connecter", width=110, height=32,
+        self.connect_btn = ctk.CTkButton(btns, text=t("connect"), width=110, height=32,
                                           font=BTN_FONT, command=self._on_connect)
         self.connect_btn.pack(side="left", padx=(0, 10))
 
-        self.send_btn = ctk.CTkButton(btns, text="Envoyer au pedalier", width=160, height=32,
+        self.send_btn = ctk.CTkButton(btns, text=t("send"), width=160, height=32,
                                        font=BTN_FONT, fg_color="#cc6600", hover_color="#e07700",
                                        command=self._on_send_to_device)
         self.send_btn.pack(side="left")
 
+        lang_label = "EN" if get_lang() == "fr" else "FR"
+        self.lang_btn = ctk.CTkButton(btns, text=lang_label, width=40, height=32,
+                                       font=BTN_FONT, fg_color="#333844", hover_color="#444c5a",
+                                       command=self._toggle_lang)
+        self.lang_btn.pack(side="left", padx=(10, 0))
+
     # ── Panels ──
 
     def _build_panels(self):
-        container = ctk.CTkFrame(self, fg_color="transparent")
+        self._panels_container = ctk.CTkFrame(self, fg_color="transparent")
+        container = self._panels_container
         container.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=GAP)
         container.grid_columnconfigure(0, weight=1, uniform="p")
         container.grid_columnconfigure(1, weight=1, uniform="p")
@@ -260,13 +269,13 @@ class VenymPitstop(ctk.CTk):
 
         self.panels: dict[str, PedalPanel] = {}
 
-        self.panels["clutch"] = PedalPanel(container, "Embrayage", "#3399ff")
+        self.panels["clutch"] = PedalPanel(container, t("clutch"), "#3399ff")
         self.panels["clutch"].grid(row=0, column=0, sticky="nsew", padx=(0, GAP // 2))
 
-        self.panels["brake"] = PedalPanel(container, "Frein", "#cc3333", is_brake=True)
+        self.panels["brake"] = PedalPanel(container, t("brake"), "#cc3333", is_brake=True)
         self.panels["brake"].grid(row=0, column=1, sticky="nsew", padx=(GAP // 2, GAP // 2))
 
-        self.panels["throttle"] = PedalPanel(container, "Accelerateur", "#00cc66")
+        self.panels["throttle"] = PedalPanel(container, t("throttle"), "#00cc66")
         self.panels["throttle"].grid(row=0, column=2, sticky="nsew", padx=(GAP // 2, 0))
 
         self.panels["throttle"].bind_config(self.config.throttle, self._on_curve_change)
@@ -276,63 +285,101 @@ class VenymPitstop(ctk.CTk):
     # ── Footer ──
 
     def _build_footer(self):
-        footer = ctk.CTkFrame(self, fg_color=CARD_BG, border_color=BORDER,
-                                border_width=1, corner_radius=8, height=50)
+        self._footer = ctk.CTkFrame(self, fg_color=CARD_BG, border_color=BORDER,
+                                      border_width=1, corner_radius=8, height=50)
+        footer = self._footer
         footer.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
 
         inner = ctk.CTkFrame(footer, fg_color="transparent")
         inner.pack(fill="x", padx=PAD, pady=PAD)
 
-        ctk.CTkLabel(inner, text="Profil", font=LABEL_FONT,
+        ctk.CTkLabel(inner, text=t("profile"), font=LABEL_FONT,
                       text_color=LABEL_CLR).pack(side="left")
         self.profile_combo = ctk.CTkComboBox(
             inner, values=self.profiles.list_profiles() or ["default"],
             width=160, height=30, font=LABEL_FONT)
         self.profile_combo.pack(side="left", padx=(10, 10))
 
-        ctk.CTkButton(inner, text="Charger", width=80, height=30,
+        ctk.CTkButton(inner, text=t("load"), width=80, height=30,
                        font=BTN_FONT, command=self._on_load_profile).pack(side="left", padx=(0, 10))
-        ctk.CTkButton(inner, text="Sauvegarder", width=100, height=30,
+        ctk.CTkButton(inner, text=t("save"), width=100, height=30,
                        font=BTN_FONT, command=self._on_save_profile).pack(side="left")
 
-        ctk.CTkButton(inner, text="Calibrer tout", width=110, height=30,
+        ctk.CTkButton(inner, text=t("calibrate_all"), width=120, height=30,
                        font=BTN_FONT, fg_color="#333844", hover_color="#444c5a",
                        command=self._on_calibrate_all).pack(side="right")
 
-        ctk.CTkButton(inner, text="Importer backup", width=120, height=30,
+        ctk.CTkButton(inner, text=t("import_backup"), width=130, height=30,
                        font=BTN_FONT, fg_color="#333844", hover_color="#444c5a",
                        command=self._on_import_backup).pack(side="right", padx=(0, 10))
 
-        ctk.CTkButton(inner, text="Exporter backup", width=120, height=30,
+        ctk.CTkButton(inner, text=t("export_backup"), width=130, height=30,
                        font=BTN_FONT, fg_color="#333844", hover_color="#444c5a",
                        command=self._on_export_backup).pack(side="right", padx=(0, 10))
 
     # ── Connection ──
 
+    def _set_connected_ui(self, connected: bool):
+        """Affiche ou masque les elements qui necessitent un pedalier connecte."""
+        if connected:
+            self._panels_container.grid()
+            self._footer.grid()
+            self.connect_btn.pack_forget()
+            self.send_btn.pack_forget()
+            self.lang_btn.pack_forget()
+            self.send_btn.pack(side="left", padx=(0, 10))
+            self.lang_btn.pack(side="left")
+        else:
+            self._panels_container.grid_remove()
+            self._footer.grid_remove()
+            self.send_btn.pack_forget()
+            self.connect_btn.pack_forget()
+            self.lang_btn.pack_forget()
+            self.connect_btn.pack(side="left", padx=(0, 10))
+            self.lang_btn.pack(side="left")
+
     def _on_connection_change(self, state: ConnectionState):
         if state == ConnectionState.CONNECTED:
             name = self._device_name or "Connecte"
             self.status_label.configure(text=name, text_color="#00cc66")
-            self.connect_btn.pack_forget()
+            self._set_connected_ui(True)
         elif state == ConnectionState.DISCONNECTED:
-            self.status_label.configure(text="Deconnecte", text_color=LABEL_CLR)
+            self.status_label.configure(text=t("disconnected"), text_color=LABEL_CLR)
             self.time_label.configure(text="")
-            self.connect_btn.pack(side="left", padx=(0, 10), before=self.send_btn)
+            self._set_connected_ui(False)
         elif state == ConnectionState.CONNECTING:
-            self.status_label.configure(text="Connexion...", text_color="#cccc00")
+            self.status_label.configure(text=t("connecting"), text_color="#cccc00")
         elif state == ConnectionState.ERROR:
-            self.status_label.configure(text="Erreur", text_color="#cc3333")
-            self.connect_btn.pack(side="left", padx=(0, 10), before=self.send_btn)
+            self.status_label.configure(text=t("error"), text_color="#cc3333")
+            self._set_connected_ui(False)
+
+    def _toggle_lang(self):
+        new_lang = "en" if get_lang() == "fr" else "fr"
+        set_lang(new_lang)
+        # Rebuild UI
+        for widget in self.winfo_children():
+            widget.destroy()
+        self._build_ui()
+        was_connected = self.device.is_connected
+        if was_connected:
+            self._set_connected_ui(True)
+            # Re-bind panels
+            self.panels["throttle"].bind_config(self.config.throttle, self._on_curve_change)
+            self.panels["brake"].bind_config(self.config.brake, self._on_curve_change)
+            self.panels["clutch"].bind_config(self.config.clutch, self._on_curve_change)
+            self.status_label.configure(text=self._device_name, text_color="#00cc66")
+        else:
+            self._set_connected_ui(False)
 
     def _on_connect(self):
         devices = VenymDevice.find_venym_devices()
         if not devices:
-            self.status_label.configure(text="Aucun pedalier trouve", text_color="#cc3333")
+            self.status_label.configure(text=t("no_device_found"), text_color="#cc3333")
             return
         info = devices[0]
         self._device_name = info.product_string or f"Venym {info.vid_pid_str}"
         if not self.device.connect(info.vendor_id, info.product_id):
-            self.status_label.configure(text="Echec connexion", text_color="#cc3333")
+            self.status_label.configure(text=t("connect_failed"), text_color="#cc3333")
             return
         self._load_device_config()
         self.device.start_auto_reconnect(info.vendor_id, info.product_id)
@@ -343,7 +390,7 @@ class VenymPitstop(ctk.CTk):
         if r03 and len(r03) >= 4:
             r03b = bytes(r03)
             secs = r03b[1] | (r03b[2] << 8) | (r03b[3] << 16)
-            self.time_label.configure(text=f"Temps d'utilisation : {secs // 3600}h {(secs % 3600) // 60:02d}m")
+            self.time_label.configure(text=t("time_meter", h=secs // 3600, m=(secs % 3600) // 60))
 
         pedal_mapping = [
             (Pedal.THROTTLE, self.config.throttle, "throttle"),
@@ -411,7 +458,7 @@ class VenymPitstop(ctk.CTk):
 
     def _on_send_to_device(self):
         if not self.device.is_connected:
-            self.status_label.configure(text="Non connecte", text_color="#cc3333")
+            self.status_label.configure(text=t("not_connected"), text_color="#cc3333")
             return
 
         from ..usb.protocol import write_pedal_config
@@ -448,7 +495,7 @@ class VenymPitstop(ctk.CTk):
                 print(f"  Erreur {cfg.name}: {e}")
 
         if sent:
-            self.status_label.configure(text=f"Config envoyee ({sent} pedales)", text_color="#00cc66")
+            self.status_label.configure(text=t("config_sent", n=sent), text_color="#00cc66")
 
     # ── Profiles ──
 
@@ -458,15 +505,15 @@ class VenymPitstop(ctk.CTk):
             self.config = self.profiles.load(name)
             for k in ["throttle", "brake", "clutch"]:
                 self.panels[k].bind_config(getattr(self.config, k), self._on_curve_change)
-            self.status_label.configure(text=f"Profil '{name}' charge", text_color="#00cc66")
+            self.status_label.configure(text=t("profile_loaded", name=name), text_color="#00cc66")
         except FileNotFoundError:
-            self.status_label.configure(text="Profil introuvable", text_color="#cc3333")
+            self.status_label.configure(text=t("profile_not_found"), text_color="#cc3333")
 
     def _on_save_profile(self):
         name = self.profile_combo.get()
         self.profiles.save(name, self.config)
         self.profile_combo.configure(values=self.profiles.list_profiles())
-        self.status_label.configure(text=f"Profil '{name}' sauvegarde", text_color="#00cc66")
+        self.status_label.configure(text=t("profile_saved", name=name), text_color="#00cc66")
 
     # ── Calibration ──
 
@@ -484,21 +531,19 @@ class VenymPitstop(ctk.CTk):
             self._on_send_to_device()
             for k in ["throttle", "brake", "clutch"]:
                 self.panels[k].refresh()
-            self.status_label.configure(text="Calibration sauvegardee", text_color="#00cc66")
+            self.status_label.configure(text=t("calibration_done"), text_color="#00cc66")
         else:
             self._cal_min = {"throttle": float("inf"), "brake": float("inf")}
             self._cal_max = {"throttle": float("-inf"), "brake": float("-inf")}
             self._calibrating = True
-            self.status_label.configure(
-                text="Appuie a fond puis relache chaque pedale. Re-clique pour terminer.",
-                text_color="#cccc00")
+            self.status_label.configure(text=t("calibrating"), text_color="#cccc00")
 
     # ── Backup export/import ──
 
     def _on_export_backup(self):
         """Exporte les Feature Reports bruts du pedalier dans un fichier JSON."""
         if not self.device.is_connected:
-            self.status_label.configure(text="Non connecte", text_color="#cc3333")
+            self.status_label.configure(text=t("not_connected"), text_color="#cc3333")
             return
 
         from tkinter import filedialog
@@ -508,7 +553,7 @@ class VenymPitstop(ctk.CTk):
             defaultextension=".json",
             filetypes=[("JSON", "*.json")],
             initialfile="venym-backup.json",
-            title="Exporter la configuration du pedalier")
+            title=t("export_dialog_title"))
         if not path:
             return
 
@@ -530,13 +575,13 @@ class VenymPitstop(ctk.CTk):
         with open(path, "w") as f:
             json.dump(backup, f, indent=2)
 
-        self.status_label.configure(text=f"Backup exporte", text_color="#00cc66")
+        self.status_label.configure(text=t("backup_exported"), text_color="#00cc66")
         print(f"  Backup exporte: {path}")
 
     def _on_import_backup(self):
         """Restaure les Feature Reports depuis un fichier JSON."""
         if not self.device.is_connected:
-            self.status_label.configure(text="Non connecte", text_color="#cc3333")
+            self.status_label.configure(text=t("not_connected"), text_color="#cc3333")
             return
 
         from tkinter import filedialog, messagebox
@@ -544,7 +589,7 @@ class VenymPitstop(ctk.CTk):
 
         path = filedialog.askopenfilename(
             filetypes=[("JSON", "*.json")],
-            title="Importer une configuration pedalier")
+            title=t("import_dialog_title"))
         if not path:
             return
 
@@ -552,18 +597,18 @@ class VenymPitstop(ctk.CTk):
             with open(path) as f:
                 backup = json.load(f)
         except Exception as e:
-            self.status_label.configure(text="Fichier invalide", text_color="#cc3333")
+            self.status_label.configure(text=t("file_invalid"), text_color="#cc3333")
             return
 
         if "reports" not in backup:
-            self.status_label.configure(text="Format de backup invalide", text_color="#cc3333")
+            self.status_label.configure(text=t("backup_invalid"), text_color="#cc3333")
             return
 
         confirm = messagebox.askyesno(
-            "Restaurer la configuration",
-            "Cela va ecraser la configuration actuelle du pedalier.\n\n"
-            f"Backup: {backup.get('device', '?')} ({backup.get('timestamp', '?')})\n\n"
-            "Continuer ?")
+            t("restore_confirm_title"),
+            t("restore_confirm_msg",
+              device=backup.get('device', '?'),
+              time=backup.get('timestamp', '?')))
         if not confirm:
             return
 
@@ -585,7 +630,7 @@ class VenymPitstop(ctk.CTk):
 
         if restored:
             self._load_device_config()
-            self.status_label.configure(text=f"Backup restaure ({restored} pedales)", text_color="#00cc66")
+            self.status_label.configure(text=t("backup_restored", n=restored), text_color="#00cc66")
             print(f"  Backup restaure depuis: {path}")
 
     # ── Polling ──
