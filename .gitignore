@@ -11,3 +11,6 @@ build/
 backup.json
 capture*.bin
 .claude/
+dist/
+build/
+*.spec

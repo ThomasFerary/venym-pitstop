@@ -299,6 +299,14 @@ class VenymPitstop(ctk.CTk):
                        font=BTN_FONT, fg_color="#333844", hover_color="#444c5a",
                        command=self._on_calibrate_all).pack(side="right")
 
+        ctk.CTkButton(inner, text="Importer backup", width=120, height=30,
+                       font=BTN_FONT, fg_color="#333844", hover_color="#444c5a",
+                       command=self._on_import_backup).pack(side="right", padx=(0, 10))
+
+        ctk.CTkButton(inner, text="Exporter backup", width=120, height=30,
+                       font=BTN_FONT, fg_color="#333844", hover_color="#444c5a",
+                       command=self._on_export_backup).pack(side="right", padx=(0, 10))
+
     # ── Connection ──
 
     def _on_connection_change(self, state: ConnectionState):
@@ -484,6 +492,101 @@ class VenymPitstop(ctk.CTk):
             self.status_label.configure(
                 text="Appuie a fond puis relache chaque pedale. Re-clique pour terminer.",
                 text_color="#cccc00")
+
+    # ── Backup export/import ──
+
+    def _on_export_backup(self):
+        """Exporte les Feature Reports bruts du pedalier dans un fichier JSON."""
+        if not self.device.is_connected:
+            self.status_label.configure(text="Non connecte", text_color="#cc3333")
+            return
+
+        from tkinter import filedialog
+        import json
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")],
+            initialfile="venym-backup.json",
+            title="Exporter la configuration du pedalier")
+        if not path:
+            return
+
+        reports = {}
+        for rid in [0x03, 0x05, 0x10, 0x11, 0x12]:
+            data = self.device.get_feature_report(rid)
+            if data:
+                reports[f"0x{rid:02x}"] = {
+                    "size": len(data),
+                    "raw": list(bytes(data)),
+                }
+
+        backup = {
+            "device": self._device_name,
+            "timestamp": _time.strftime("%Y-%m-%d %H:%M:%S"),
+            "reports": reports,
+        }
+
+        with open(path, "w") as f:
+            json.dump(backup, f, indent=2)
+
+        self.status_label.configure(text=f"Backup exporte", text_color="#00cc66")
+        print(f"  Backup exporte: {path}")
+
+    def _on_import_backup(self):
+        """Restaure les Feature Reports depuis un fichier JSON."""
+        if not self.device.is_connected:
+            self.status_label.configure(text="Non connecte", text_color="#cc3333")
+            return
+
+        from tkinter import filedialog, messagebox
+        import json
+
+        path = filedialog.askopenfilename(
+            filetypes=[("JSON", "*.json")],
+            title="Importer une configuration pedalier")
+        if not path:
+            return
+
+        try:
+            with open(path) as f:
+                backup = json.load(f)
+        except Exception as e:
+            self.status_label.configure(text="Fichier invalide", text_color="#cc3333")
+            return
+
+        if "reports" not in backup:
+            self.status_label.configure(text="Format de backup invalide", text_color="#cc3333")
+            return
+
+        confirm = messagebox.askyesno(
+            "Restaurer la configuration",
+            "Cela va ecraser la configuration actuelle du pedalier.\n\n"
+            f"Backup: {backup.get('device', '?')} ({backup.get('timestamp', '?')})\n\n"
+            "Continuer ?")
+        if not confirm:
+            return
+
+        from ..usb.protocol import write_pedal_config
+
+        restored = 0
+        for rid_str, rid_int in [("0x10", 0x10), ("0x11", 0x11), ("0x12", 0x12)]:
+            if rid_str not in backup["reports"]:
+                continue
+            raw = bytes(backup["reports"][rid_str]["raw"])
+
+            payload = bytearray(63)
+            payload[0] = rid_int
+            for i, b in enumerate(raw[:min(len(raw), 62)]):
+                payload[1 + i] = b
+            self.device.send_feature_report(bytes([rid_int]) + bytes(payload))
+            _time.sleep(0.2)
+            restored += 1
+
+        if restored:
+            self._load_device_config()
+            self.status_label.configure(text=f"Backup restaure ({restored} pedales)", text_color="#00cc66")
+            print(f"  Backup restaure depuis: {path}")
 
     # ── Polling ──
 
