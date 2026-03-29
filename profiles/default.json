@@ -1,0 +1,59 @@
+{
+  "name": "default",
+  "description": "Profil par defaut — courbes lineaires",
+  "created": "2026-03-29T00:00:00",
+  "version": 1,
+  "config": {
+    "throttle": {
+      "name": "Accélérateur",
+      "dead_zone_low": 0.0,
+      "dead_zone_high": 0.0,
+      "cal_min": 2291,
+      "cal_max": 4708,
+      "curve": [
+        {"x": 0.0, "y": 0.0},
+        {"x": 0.2, "y": 0.2},
+        {"x": 0.4, "y": 0.4},
+        {"x": 0.6, "y": 0.6},
+        {"x": 0.8, "y": 0.8},
+        {"x": 1.0, "y": 1.0}
+      ],
+      "fw_param_a": 600,
+      "fw_param_b": 400
+    },
+    "brake": {
+      "name": "Frein",
+      "dead_zone_low": 0.0,
+      "dead_zone_high": 0.0,
+      "cal_min": 39,
+      "cal_max": 5974,
+      "curve": [
+        {"x": 0.0, "y": 0.0},
+        {"x": 0.2, "y": 0.2},
+        {"x": 0.4, "y": 0.4},
+        {"x": 0.6, "y": 0.6},
+        {"x": 0.8, "y": 0.8},
+        {"x": 1.0, "y": 1.0}
+      ],
+      "fw_param_a": 500,
+      "fw_param_b": 4300
+    },
+    "clutch": {
+      "name": "Embrayage",
+      "dead_zone_low": 0.0,
+      "dead_zone_high": 0.0,
+      "cal_min": 3000,
+      "cal_max": 7000,
+      "curve": [
+        {"x": 0.0, "y": 0.0},
+        {"x": 0.2, "y": 0.2},
+        {"x": 0.4, "y": 0.4},
+        {"x": 0.6, "y": 0.6},
+        {"x": 0.8, "y": 0.8},
+        {"x": 1.0, "y": 1.0}
+      ],
+      "fw_param_a": 300,
+      "fw_param_b": 100
+    }
+  }
+}
