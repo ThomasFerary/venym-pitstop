@@ -7,7 +7,8 @@ import time as _time
 import tkinter as tk
 import customtkinter as ctk
 
-from ..core.config import FullConfig, PedalConfig, ResponseCurve, CurvePoint
+from ..core.config import (FullConfig, PedalConfig, ResponseCurve, CurvePoint,
+                           GlobalSettings, PedalLedConfig, LedColor)
 from ..usb.protocol import (FeatureReport, PedalReport, Pedal, PEDAL_TO_REPORT,
                                 fw_y1_to_output_pct, output_pct_to_fw_y1,
                                 CurvePoint as FwCurvePoint)
@@ -34,7 +35,8 @@ PCT_FONT    = ("", 20, "bold")
 # ── PedalPanel ─────────────────────────────────────────
 class PedalPanel(ctk.CTkFrame):
 
-    def __init__(self, master, name: str, color: str, is_brake: bool = False, **kwargs):
+    def __init__(self, master, name: str, color: str, is_brake: bool = False,
+                 has_led: bool = False, **kwargs):
         kwargs.setdefault("fg_color", CARD_BG)
         kwargs.setdefault("border_color", BORDER)
         kwargs.setdefault("border_width", 1)
@@ -44,7 +46,10 @@ class PedalPanel(ctk.CTkFrame):
         self.pedal_name = name
         self.color = color
         self.is_brake = is_brake
+        self.has_led = has_led
         self._value = 0.0
+        self._led_config: PedalLedConfig | None = None
+        self._on_led_change_cb = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -70,8 +75,29 @@ class PedalPanel(ctk.CTkFrame):
         self.curve_editor.configure(bg=CARD_BG)
         self.curve_editor.grid(row=0, column=0, sticky="nsew")
 
-        self.bar_canvas = tk.Canvas(mid, width=24, bg=CARD_BG, highlightthickness=0)
-        self.bar_canvas.grid(row=0, column=1, sticky="ns", padx=(GAP // 2, 0))
+        # ── LED color indicators (right side of curve) ──
+        bar_frame = ctk.CTkFrame(mid, fg_color="transparent")
+        bar_frame.grid(row=0, column=1, sticky="ns", padx=(GAP // 2, 0))
+
+        if has_led:
+            # Color button for 100% (max) — disabled, firmware protocol unknown
+            self.led_max_btn = tk.Canvas(bar_frame, width=22, height=22,
+                                          bg=color, highlightthickness=1,
+                                          highlightbackground="#333333")
+            self.led_max_btn.pack(pady=(0, 4))
+            # Dimmed overlay to indicate disabled
+            self.led_max_btn.create_rectangle(0, 0, 22, 22, fill="", outline="",
+                                               stipple="gray50")
+
+        self.bar_canvas = tk.Canvas(bar_frame, width=24, bg=CARD_BG, highlightthickness=0)
+        self.bar_canvas.pack(fill="y", expand=True)
+
+        if has_led:
+            # Color button for 0% (min/rest) — disabled, firmware protocol unknown
+            self.led_min_btn = tk.Canvas(bar_frame, width=22, height=22,
+                                          bg="#000000", highlightthickness=1,
+                                          highlightbackground="#333333")
+            self.led_min_btn.pack(pady=(4, 0))
 
         # ── Settings ──
         settings = ctk.CTkFrame(self, fg_color="transparent")
@@ -184,6 +210,32 @@ class PedalPanel(ctk.CTkFrame):
         cfg.fw_param_b = int(round(new_kg * 100))
         self.force_label.configure(text=f"{new_kg:.1f} kg")
 
+    # ── LED ──
+
+    def bind_led_config(self, led_config: PedalLedConfig, on_change=None):
+        self._led_config = led_config
+        self._on_led_change_cb = on_change
+        if self.has_led:
+            self.led_max_btn.configure(bg=led_config.color_max.to_hex())
+            self.led_min_btn.configure(bg=led_config.color_min.to_hex())
+
+    def _pick_led_color(self, which: str):
+        from tkinter import colorchooser
+        if not self._led_config:
+            return
+        current = self._led_config.color_max if which == "max" else self._led_config.color_min
+        result = colorchooser.askcolor(color=current.to_hex(), title=f"LED {which}")
+        if result and result[1]:
+            new_color = LedColor.from_hex(result[1])
+            if which == "max":
+                self._led_config.color_max = new_color
+                self.led_max_btn.configure(bg=new_color.to_hex())
+            else:
+                self._led_config.color_min = new_color
+                self.led_min_btn.configure(bg=new_color.to_hex())
+            if self._on_led_change_cb:
+                self._on_led_change_cb(self._led_config)
+
 
 # ── Main Window ────────────────────────────────────────
 class VenymPitstop(ctk.CTk):
@@ -191,8 +243,8 @@ class VenymPitstop(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(t("app_title"))
-        self.geometry("1250x680")
-        self.minsize(1000, 550)
+        self.geometry("1250x780")
+        self.minsize(1000, 650)
         self.configure(fg_color=BG)
 
         ctk.set_appearance_mode("dark")
@@ -205,15 +257,18 @@ class VenymPitstop(ctk.CTk):
         self._calibrating = False
         self._device_name = ""
 
+        self._vjoy_available = False
+
         self._build_ui()
         self._set_connected_ui(False)
         self._poll_device()
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
         self._build_header()
+        self._build_global_settings()
         self._build_panels()
         self._build_footer()
 
@@ -256,12 +311,112 @@ class VenymPitstop(ctk.CTk):
                                        command=self._toggle_lang)
         self.lang_btn.pack(side="left", padx=(10, 0))
 
+    # ── Global Settings ──
+
+    def _build_global_settings(self):
+        self._global_frame = ctk.CTkFrame(self, fg_color=CARD_BG, border_color=BORDER,
+                                            border_width=1, corner_radius=8)
+        frame = self._global_frame
+        frame.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(GAP, 0))
+
+        DISABLED_CLR = "#3a3a4a"
+
+        # Title + not implemented badge
+        title_row = ctk.CTkFrame(frame, fg_color="transparent")
+        title_row.pack(fill="x", padx=PAD, pady=(PAD, 5))
+        ctk.CTkLabel(title_row, text=t("global_settings"), font=TITLE_FONT,
+                      text_color=TEXT_CLR).pack(side="left")
+        ctk.CTkLabel(title_row, text=f"  ⚠ {t('not_implemented')}",
+                      font=("", 9), text_color="#886622").pack(side="left", padx=(10, 0))
+
+        # Content row
+        content = ctk.CTkFrame(frame, fg_color="transparent")
+        content.pack(fill="x", padx=PAD, pady=(0, PAD))
+
+        gs = self.config.global_settings
+
+        # Left: inverted pedals checkbox (disabled)
+        self._invert_var = ctk.BooleanVar(value=gs.inverted_pedals)
+        self._invert_cb = ctk.CTkCheckBox(content, text=t("inverted_pedals"),
+                                            variable=self._invert_var, font=LABEL_FONT,
+                                            text_color=DISABLED_CLR, state="disabled",
+                                            command=self._on_global_change)
+        self._invert_cb.pack(side="left", padx=(0, 30))
+
+        # Middle: flicker brake LEDs (disabled)
+        self._flicker_var = ctk.BooleanVar(value=gs.flicker_brake_enabled)
+        self._flicker_cb = ctk.CTkCheckBox(content, text=t("flicker_brake"),
+                                             variable=self._flicker_var, font=LABEL_FONT,
+                                             text_color=DISABLED_CLR, state="disabled",
+                                             command=self._on_global_change)
+        self._flicker_cb.pack(side="left", padx=(0, 5))
+
+        self._flicker_thresh = ctk.CTkEntry(content, width=70, height=28, font=VALUE_FONT,
+                                              state="disabled")
+        self._flicker_thresh.pack(side="left", padx=(0, 20))
+
+        # LED max intensity (disabled)
+        ctk.CTkLabel(content, text=t("led_max_intensity"), font=LABEL_FONT,
+                      text_color=DISABLED_CLR).pack(side="left", padx=(0, 5))
+
+        self._intensity_entry = ctk.CTkEntry(content, width=70, height=28, font=VALUE_FONT,
+                                               state="disabled")
+        self._intensity_entry.pack(side="left", padx=(0, 30))
+
+        # ABS telemetry flicker (second row, disabled)
+        row2 = ctk.CTkFrame(frame, fg_color="transparent")
+        row2.pack(fill="x", padx=PAD, pady=(0, PAD))
+
+        self._abs_var = ctk.BooleanVar(value=gs.flicker_abs_telemetry)
+        self._abs_cb = ctk.CTkCheckBox(row2, text=t("flicker_abs"),
+                                         variable=self._abs_var, font=LABEL_FONT,
+                                         text_color=DISABLED_CLR, state="disabled",
+                                         command=self._on_global_change)
+        self._abs_cb.pack(side="left")
+
+    def _on_global_change(self):
+        gs = self.config.global_settings
+        gs.inverted_pedals = self._invert_var.get()
+        gs.flicker_brake_enabled = self._flicker_var.get()
+        gs.flicker_abs_telemetry = self._abs_var.get()
+
+    def _on_flicker_thresh_change(self, event=None):
+        text = self._flicker_thresh.get().replace("%", "").strip()
+        try:
+            val = max(0.0, min(100.0, float(text)))
+        except ValueError:
+            val = self.config.global_settings.flicker_brake_threshold
+        self.config.global_settings.flicker_brake_threshold = val
+        self._flicker_thresh.delete(0, "end")
+        self._flicker_thresh.insert(0, f"{val:.2f}%")
+
+    def _on_intensity_change(self, event=None):
+        text = self._intensity_entry.get().replace("%", "").strip()
+        try:
+            val = max(0.0, min(100.0, float(text)))
+        except ValueError:
+            val = self.config.global_settings.led_max_intensity
+        self.config.global_settings.led_max_intensity = val
+        self._intensity_entry.delete(0, "end")
+        self._intensity_entry.insert(0, f"{val:.0f}%")
+
+    def _refresh_global_settings_ui(self):
+        """Sync global settings UI with current config values."""
+        gs = self.config.global_settings
+        self._invert_var.set(gs.inverted_pedals)
+        self._flicker_var.set(gs.flicker_brake_enabled)
+        self._abs_var.set(gs.flicker_abs_telemetry)
+        self._flicker_thresh.delete(0, "end")
+        self._flicker_thresh.insert(0, f"{gs.flicker_brake_threshold:.2f}%")
+        self._intensity_entry.delete(0, "end")
+        self._intensity_entry.insert(0, f"{gs.led_max_intensity:.0f}%")
+
     # ── Panels ──
 
     def _build_panels(self):
         self._panels_container = ctk.CTkFrame(self, fg_color="transparent")
         container = self._panels_container
-        container.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=GAP)
+        container.grid(row=2, column=0, sticky="nsew", padx=PAD, pady=GAP)
         container.grid_columnconfigure(0, weight=1, uniform="p")
         container.grid_columnconfigure(1, weight=1, uniform="p")
         container.grid_columnconfigure(2, weight=1, uniform="p")
@@ -272,15 +427,20 @@ class VenymPitstop(ctk.CTk):
         self.panels["clutch"] = PedalPanel(container, t("clutch"), "#3399ff")
         self.panels["clutch"].grid(row=0, column=0, sticky="nsew", padx=(0, GAP // 2))
 
-        self.panels["brake"] = PedalPanel(container, t("brake"), "#cc3333", is_brake=True)
+        self.panels["brake"] = PedalPanel(container, t("brake"), "#cc3333",
+                                           is_brake=True, has_led=True)
         self.panels["brake"].grid(row=0, column=1, sticky="nsew", padx=(GAP // 2, GAP // 2))
 
-        self.panels["throttle"] = PedalPanel(container, t("throttle"), "#00cc66")
+        self.panels["throttle"] = PedalPanel(container, t("throttle"), "#00cc66", has_led=True)
         self.panels["throttle"].grid(row=0, column=2, sticky="nsew", padx=(GAP // 2, 0))
 
         self.panels["throttle"].bind_config(self.config.throttle, self._on_curve_change)
         self.panels["brake"].bind_config(self.config.brake, self._on_curve_change)
         self.panels["clutch"].bind_config(self.config.clutch, self._on_curve_change)
+
+        # Bind LED configs
+        self.panels["brake"].bind_led_config(self.config.brake_led)
+        self.panels["throttle"].bind_led_config(self.config.throttle_led)
 
     # ── Footer ──
 
@@ -288,7 +448,7 @@ class VenymPitstop(ctk.CTk):
         self._footer = ctk.CTkFrame(self, fg_color=CARD_BG, border_color=BORDER,
                                       border_width=1, corner_radius=8, height=50)
         footer = self._footer
-        footer.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
+        footer.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
 
         inner = ctk.CTkFrame(footer, fg_color="transparent")
         inner.pack(fill="x", padx=PAD, pady=PAD)
@@ -322,6 +482,7 @@ class VenymPitstop(ctk.CTk):
     def _set_connected_ui(self, connected: bool):
         """Affiche ou masque les elements qui necessitent un pedalier connecte."""
         if connected:
+            self._global_frame.grid()
             self._panels_container.grid()
             self._footer.grid()
             self.connect_btn.pack_forget()
@@ -330,6 +491,7 @@ class VenymPitstop(ctk.CTk):
             self.send_btn.pack(side="left", padx=(0, 10))
             self.lang_btn.pack(side="left")
         else:
+            self._global_frame.grid_remove()
             self._panels_container.grid_remove()
             self._footer.grid_remove()
             self.send_btn.pack_forget()
@@ -367,6 +529,8 @@ class VenymPitstop(ctk.CTk):
             self.panels["throttle"].bind_config(self.config.throttle, self._on_curve_change)
             self.panels["brake"].bind_config(self.config.brake, self._on_curve_change)
             self.panels["clutch"].bind_config(self.config.clutch, self._on_curve_change)
+            self.panels["brake"].bind_led_config(self.config.brake_led)
+            self.panels["throttle"].bind_led_config(self.config.throttle_led)
             self.status_label.configure(text=self._device_name, text_color="#00cc66")
         else:
             self._set_connected_ui(False)
@@ -505,6 +669,9 @@ class VenymPitstop(ctk.CTk):
             self.config = self.profiles.load(name)
             for k in ["throttle", "brake", "clutch"]:
                 self.panels[k].bind_config(getattr(self.config, k), self._on_curve_change)
+            self.panels["brake"].bind_led_config(self.config.brake_led)
+            self.panels["throttle"].bind_led_config(self.config.throttle_led)
+            self._refresh_global_settings_ui()
             self.status_label.configure(text=t("profile_loaded", name=name), text_color="#00cc66")
         except FileNotFoundError:
             self.status_label.configure(text=t("profile_not_found"), text_color="#cc3333")

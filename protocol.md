@@ -64,7 +64,7 @@ Offset  Type        Description
 7-8     uint16 LE   Build number (= 9000)
 ```
 
-### Report 0x05 — ADC temps réel (6B, lecture)
+### Report 0x05 — ADC temps réel (7B, lecture)
 
 Miroir temps réel des valeurs ADC **brutes** (avant traitement firmware).
 
@@ -73,10 +73,26 @@ Offset  Type        Description
 ------  ----------  ----------------------------
 0-1     uint16 LE   ADC brut accélérateur
 2-3     uint16 LE   ADC brut frein
-4-5     uint16 LE   Réservé (= 0)
+4-5     uint16 LE   ADC brut embrayage (0 si non connecté)
+6       uint8       Bruit ADC / résidu multiplexage (NON persistant)
 ```
 
+Ce report retourne 7 bytes (et non 6). Le byte 6 fluctue en permanence entre des valeurs
+comme 0x00, 0x57, 0x5c, 0x61, 0x64, 0x65 — même au repos. C'est du bruit ADC ou un
+artefact du multiplexeur analogique, **pas un setting persistant**.
+
 Ce report est le seul writable via `send_feature_report`, mais les valeurs sont immédiatement écrasées par l'ADC.
+
+### Global Settings & LED Colors — NON présents dans le firmware
+
+Les réglages globaux visibles dans l'ancienne app (inversion pédales, seuil flicker LEDs,
+intensité max LEDs, couleurs LED) ne sont stockés dans **aucun Feature Report** du firmware.
+Un probe exhaustif des reports 0x00–0x20 et 0xF0–0xFF ne révèle aucun report inconnu.
+Les 38 bytes des reports 0x10–0x12 sont entièrement documentés sans espace libre.
+
+**Conclusion** : ces settings étaient gérés côté logiciel par l'ancienne app Venym Pitstop
+(probablement dans le registre Windows ou un fichier de configuration local).
+Notre implémentation les persiste dans les profils JSON.
 
 ### Reports 0x10 / 0x11 / 0x12 — Configuration pédale (38B)
 

@@ -174,11 +174,92 @@ class PedalConfig:
 
 
 @dataclass
+class LedColor:
+    """Couleur RGB pour les LEDs du pédalier."""
+    r: int = 0
+    g: int = 0
+    b: int = 0
+
+    def to_hex(self) -> str:
+        return f"#{self.r:02x}{self.g:02x}{self.b:02x}"
+
+    @staticmethod
+    def from_hex(hex_str: str) -> "LedColor":
+        hex_str = hex_str.lstrip("#")
+        return LedColor(
+            r=int(hex_str[0:2], 16),
+            g=int(hex_str[2:4], 16),
+            b=int(hex_str[4:6], 16),
+        )
+
+    def to_dict(self) -> dict:
+        return {"r": self.r, "g": self.g, "b": self.b}
+
+    @staticmethod
+    def from_dict(d: dict) -> "LedColor":
+        return LedColor(r=d.get("r", 0), g=d.get("g", 0), b=d.get("b", 0))
+
+
+@dataclass
+class GlobalSettings:
+    """Réglages globaux du pédalier (stockés dans le firmware)."""
+    inverted_pedals: bool = False          # Swap left/right connectors
+    flicker_brake_enabled: bool = True     # Flicker brake LEDs beyond threshold
+    flicker_brake_threshold: float = 90.0  # Threshold % for brake LED flicker
+    led_max_intensity: float = 100.0       # LEDs max intensity %
+    flicker_abs_telemetry: bool = False    # Flicker brake LEDs using ABS signal
+
+    def to_dict(self) -> dict:
+        return {
+            "inverted_pedals": self.inverted_pedals,
+            "flicker_brake_enabled": self.flicker_brake_enabled,
+            "flicker_brake_threshold": self.flicker_brake_threshold,
+            "led_max_intensity": self.led_max_intensity,
+            "flicker_abs_telemetry": self.flicker_abs_telemetry,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "GlobalSettings":
+        return GlobalSettings(
+            inverted_pedals=d.get("inverted_pedals", False),
+            flicker_brake_enabled=d.get("flicker_brake_enabled", True),
+            flicker_brake_threshold=d.get("flicker_brake_threshold", 90.0),
+            led_max_intensity=d.get("led_max_intensity", 100.0),
+            flicker_abs_telemetry=d.get("flicker_abs_telemetry", False),
+        )
+
+
+@dataclass
+class PedalLedConfig:
+    """Configuration LED pour une pédale (couleur à 0% et 100%)."""
+    color_min: LedColor = field(default_factory=lambda: LedColor(0, 0, 0))  # Couleur au repos (0%)
+    color_max: LedColor = field(default_factory=lambda: LedColor(0, 0, 0))  # Couleur à fond (100%)
+
+    def to_dict(self) -> dict:
+        return {
+            "color_min": self.color_min.to_dict(),
+            "color_max": self.color_max.to_dict(),
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "PedalLedConfig":
+        return PedalLedConfig(
+            color_min=LedColor.from_dict(d.get("color_min", {})),
+            color_max=LedColor.from_dict(d.get("color_max", {})),
+        )
+
+
+@dataclass
 class FullConfig:
-    """Configuration complète du pédalier (3 pédales)."""
+    """Configuration complète du pédalier (3 pédales + global)."""
     throttle: PedalConfig
     brake: PedalConfig
     clutch: PedalConfig
+    global_settings: GlobalSettings = field(default_factory=GlobalSettings)
+    brake_led: PedalLedConfig = field(default_factory=lambda: PedalLedConfig(
+        color_min=LedColor(0, 0, 0), color_max=LedColor(255, 0, 0)))
+    throttle_led: PedalLedConfig = field(default_factory=lambda: PedalLedConfig(
+        color_min=LedColor(0, 0, 0), color_max=LedColor(0, 0, 255)))
 
     @staticmethod
     def default() -> "FullConfig":
@@ -193,12 +274,22 @@ class FullConfig:
             "throttle": self.throttle.to_dict(),
             "brake": self.brake.to_dict(),
             "clutch": self.clutch.to_dict(),
+            "global_settings": self.global_settings.to_dict(),
+            "brake_led": self.brake_led.to_dict(),
+            "throttle_led": self.throttle_led.to_dict(),
         }
 
     @staticmethod
     def from_dict(data: dict) -> "FullConfig":
-        return FullConfig(
+        cfg = FullConfig(
             throttle=PedalConfig.from_dict(data["throttle"]),
             brake=PedalConfig.from_dict(data["brake"]),
             clutch=PedalConfig.from_dict(data["clutch"]),
         )
+        if "global_settings" in data:
+            cfg.global_settings = GlobalSettings.from_dict(data["global_settings"])
+        if "brake_led" in data:
+            cfg.brake_led = PedalLedConfig.from_dict(data["brake_led"])
+        if "throttle_led" in data:
+            cfg.throttle_led = PedalLedConfig.from_dict(data["throttle_led"])
+        return cfg
